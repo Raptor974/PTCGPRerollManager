@@ -1,0 +1,43 @@
+{
+  "name": "pocketrerollmanager",
+  "version": "1.0.0",
+  "main": "index.mjs",
+  "type": "module",
+  "dependencies": {
+    "async-lock": "^1.4.1",
+    "before-after-hook": "^3.0.2",
+    "bottleneck": "^2.19.5",
+    "discord-api-types": "^0.37.119",
+    "discord.js": "^14.17.3",
+    "fast-content-type-parse": "^2.0.1",
+    "fast-deep-equal": "^3.1.3",
+    "lodash": "^4.17.21",
+    "lodash.snakecase": "^4.1.1",
+    "magic-bytes.js": "^1.10.0",
+    "octokit": "^4.1.1",
+    "toad-cache": "^3.7.0",
+    "ts-mixer": "^6.0.4",
+    "tslib": "^2.8.1",
+    "undici": "^6.19.8",
+    "undici-types": "^6.20.0",
+    "universal-github-app-jwt": "^2.2.0",
+    "universal-user-agent": "^7.0.2",
+    "ws": "^8.18.0",
+    "xml2js": "^0.6.2"
+  },
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/TheThobi/PTCGPRerollManager.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/TheThobi/PTCGPRerollManager/issues"
+  },
+  "homepage": "https://github.com/TheThobi/PTCGPRerollManager#readme",
+  "description": ""
+}

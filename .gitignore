@@ -1,0 +1,4 @@
+discloud*
+node_modules/*
+backup_*
+users/*

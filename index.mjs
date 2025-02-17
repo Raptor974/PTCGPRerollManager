@@ -382,7 +382,7 @@ async function inactivityCheck(myGuild){
     }
 }
 
-async function createForumPost( guild, message, channelID, packName ) {
+async function createForumPost( guild, message, channelID, packName, titleName, ownerID, accountID, packAmount) {
 
     const text_verificationRedirect = localize("Verification ici :","Verification link here :");
     const text_godpackFoundBy = localize(`${packName} trouvé par`,`${packName} found by`);
@@ -391,9 +391,6 @@ async function createForumPost( guild, message, channelID, packName ) {
         "Write **/miss** if another one appeared or you didn't saw it\n**/verified** or **/dead** to change post state");
     const text_eligible = localize("**Éligibles :**","**Eligible :**");
     
-    var arrayGodpackMessage = splitMulti(message.content, ['<@','>','\n','(',')']);
-    var ownerID = arrayGodpackMessage[1];
-
     const member = await getMemberByID(guild, ownerID);
 
     // Skip if member do not exist
@@ -402,10 +399,6 @@ async function createForumPost( guild, message, channelID, packName ) {
         return;
     }
     var ownerUsername = (member).user.username;
-
-    var accountName = arrayGodpackMessage[3];
-    var accountID = arrayGodpackMessage[4];
-    var text_packAmount = arrayGodpackMessage[7];
     
     const godPackFound = await getUserAttribValue( client, ownerID, attrib_GodPackFound );
     if( godPackFound == undefined ) {
@@ -431,7 +424,7 @@ async function createForumPost( guild, message, channelID, packName ) {
         const text_foundbyLine = `${text_godpackFoundBy} **<@${ownerID}>**\n`;
         
         // Second line
-        var packAmount = extractNumbers(text_packAmount);
+        packAmount = extractNumbers(packAmount);
         packAmount = Math.max(Math.min(packAmount,3),1); // Ensure that it is only 1 to 3
         const text_miss = `## [ 0 miss / ${missBeforeDead[packAmount-1]} ]`
         const text_missLine = `${text_miss}\n\n`;
@@ -445,7 +438,7 @@ async function createForumPost( guild, message, channelID, packName ) {
         // Create forum post for verification
         const forum = client.channels.cache.get(channelID);
         const forumPost = forum.threads.create({
-        name: `⌛ ${accountName} - ${text_packAmount}`,
+        name: `⌛ ${titleName}`,
         message: {
             content: text_foundbyLine + text_missLine + text_eligibleLine + text_metadataLine + text_commandTooltip,
         },
@@ -1085,17 +1078,36 @@ client.on("messageCreate", async (message) => {
     if (message.channel.id === channelID_Webhook)
     {
         //Execute when screen is posted
-        if (message.attachments.first() != undefined && !message.content.includes("invalid") && message.content.includes("God Pack") ) {
+        if (message.attachments.first() != undefined && !message.content.includes("invalid") && message.content.toLowerCase().includes("god pack found") ) {
 
-            await createForumPost(guild, message, channelID_GPVerificationForum, "GodPack");
+            var arrayGodpackMessage = splitMulti(message.content, ['<@','>','\n','(',')','[',']']);
+            
+            var ownerID = arrayGodpackMessage[1];
+            var accountName = arrayGodpackMessage[3];
+            var accountID = arrayGodpackMessage[4];
+            var twoStarsRatio = arrayGodpackMessage[7];
+            var packAmount = arrayGodpackMessage[9];
+
+            var titleName = `${accountName}[${packAmount}][${twoStarsRatio}]`;
+
+            await createForumPost(guild, message, channelID_GPVerificationForum, "GodPack", titleName, ownerID, accountID, packAmount);
         }
 
         //Execute when screen is posted
-        if (message.attachments.first() != undefined && !message.content.includes("invalid") && message.content.includes("2-Star") ) {
+        if (message.attachments.first() != undefined && !message.content.includes("invalid") && message.content.toLowerCase().includes("double") ) {
 
-            // if(channelID_2StarVerificationForum != ""){
-            //     await createForumPost(guild, message, channelID_2StarVerificationForum, "2Star");
-            // }
+            if(channelID_2StarVerificationForum == ""){return;}
+
+            var arrayGodpackMessage = splitMulti(message.content, ['<@','>','\n','(',')','[',']',' by ']);
+            
+            var ownerID = arrayGodpackMessage[1];
+            var accountName = arrayGodpackMessage[3];
+            var accountID = arrayGodpackMessage[4];
+            var packAmount = extractNumbers(arrayGodpackMessage[6])+"P";
+
+            var titleName = `${accountName}[${packAmount}]`;
+
+            await createForumPost(guild, message, channelID_2StarVerificationForum, "Double 2Star", titleName, ownerID, accountID, packAmount);
         }
     }
 

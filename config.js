@@ -11,15 +11,17 @@ const gitToken = "github_pat_XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
 const gitGistID = "XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX";
 const gitGistName = "PTCGPRerollGroupIDs.txt";
 
-const missBeforeDead = [5,7,9];
+const missBeforeDead = [4,6,8];
 
 const text_verifiedLogo = "✅";
 const text_deadLogo = "💀";
 const text_waitingLogo = "⌛";
 
-const refreshStatsInterval = 600000;
+var refreshInterval = 10;
+var inactiveTime = 31;
 
 const EnglishLanguage = true;
+const AutoKickInactive = false;
 
 export {
     token,
@@ -37,6 +39,8 @@ export {
     text_verifiedLogo,
     text_deadLogo,
     text_waitingLogo,
-    refreshStatsInterval,
+    refreshInterval,
+    inactiveTime,
     EnglishLanguage,
+    AutoKickInactive,
 };

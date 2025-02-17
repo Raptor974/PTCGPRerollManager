@@ -33,7 +33,9 @@ import {
     text_verifiedLogo,
     text_deadLogo,
     text_waitingLogo,
-    refreshStatsInterval,
+    refreshInterval,
+    inactiveTime,
+    AutoKickInactive,
 } from './config.js';
 
 import {
@@ -42,7 +44,9 @@ import {
     roundToOneDecimal, 
     countDigits, 
     extractNumbers, 
-    isNumbers, 
+    isNumbers,
+    convertMnToMs,
+    convertMsToMn,
     splitMulti, 
     replaceLastOccurrence,
     replaceMissCount,
@@ -61,6 +65,7 @@ import {
     setUserSubsystemAttribValue,
     getUserSubsystemAttribValue,
     getActiveUsers,
+    getActiveIDs,
     getAllUsers,
     getUsernameFromUsers, 
     getUsernameFromUser, 
@@ -69,6 +74,8 @@ import {
     getAttribValueFromUsers,
     getAttribValueFromUser,
     getAttribValueFromUserSubsystems,
+    refreshUserActiveState,
+    refreshUserRealInstances,
     cleanString,
 } from './Dependencies/xmlManager.js';
 
@@ -86,6 +93,12 @@ import {
     attrib_LastActiveTime,
     attrib_LastHeartbeatTime,
     attrib_PacksPerMin,
+    attrib_GodPackFound,
+    attrib_LastActiveTime,
+    attrib_LastHeartbeatTime,
+    attrib_TotalTime,
+    attrib_TotalMiss,
+    attrib_ActiveState,
 } from './Dependencies/xmlConfig.js';
 
 import {
@@ -114,7 +127,8 @@ const client = new Client({
 	]
 });
 
-var startIntervalTime = Date.now();
+var startIntervalTime = Date.now();    
+var evenTurnInterval = false;
 
 // ID GitGist Management
 
@@ -122,7 +136,9 @@ const octokit = new Octokit({
     auth: gitToken
 })
 
-async function updateGist( newContent ){
+async function updateGist(){
+
+    const gitContent = await getActiveIDs();
 
     console.log("================ Update GistGit ================")
 
@@ -131,7 +147,7 @@ async function updateGist( newContent ){
         description: '',
         files:{
             [gitGistName]:{
-                content: newContent
+                content: gitContent
             }
         },
         headers: {
@@ -142,11 +158,21 @@ async function updateGist( newContent ){
 
 // Functions
 
+async function getMemberByID( myGuild, id ){
+
+    try{
+        return await myGuild.members.fetch(cleanString(id));
+    }
+    catch{
+        return ""
+    }
+}
+
 function getNexIntervalRemainingTime() {
     const currentTime = Date.now();
     const elapsedTime = currentTime - startIntervalTime;
-    const timeRemaining = refreshStatsInterval - elapsedTime;
-    return timeRemaining/60000;
+    const timeRemaining = (refreshInterval) - convertMsToMn(elapsedTime);
+    return timeRemaining;
 }
 
 async function getUsersStats( users, members ){
@@ -167,24 +193,24 @@ async function getUsersStats( users, members ){
         const sessionTimeSubsystems = getAttribValueFromUserSubsystems(user, attrib_SessionTime, 0);
         const sessionPacksSubsystems = getAttribValueFromUserSubsystems(user, attrib_SessionPacksOpened, 0);
         const lastHBTimeSubsystems = getAttribValueFromUserSubsystems(user, attrib_LastHeartbeatTime, 0);
-        const PacksSubsystemsSinceLastHb = getAttribValueFromUserSubsystems(user, attrib_DiffPacksSinceLastHB, 0);
-        var totalSessionPacksSubsystems = 0;
-        var totalPacksSinceLastHb = 0;
-        var biggerSessionTimeSubsystems = 0;
-        var totalInstancesSubsystems = 0;
-        var smallerDiffHBTimeSubsystems = 1000;
 
-        for (let i = 0; i < instancesSubsystems.length; i++){
+        var session_PacksSubsystems = 0;
+        var total_PacksSubsystems = 0;
+        var biggerSessionTimeSubsystems = 0;
+        var totalPacksSinceLastHb = 0;
+
+        for (let i = 0; i < lastHBTimeSubsystems.length; i++){
 
             const diffHBSubsystem = (currentTime - new Date(lastHBTimeSubsystems[i])) / 60000;
-            smallerDiffHBTimeSubsystems = Math.min(smallerDiffHBTimeSubsystems, diffHBSubsystem);
-
-            if(diffHBSubsystem < 31){ // If last HB less than 31mn then count instances and session time
-                totalInstancesSubsystems += parseInt(instancesSubsystems[i]);
+            
+            if(diffHBSubsystem < parseFloat(inactiveTime)){ // If last HB less than Xmn then count instances and session time
                 biggerSessionTimeSubsystems = Math.max(biggerSessionTimeSubsystems, sessionTimeSubsystems[i]);
-                totalPacksSinceLastHb += parseFloat(PacksSubsystemsSinceLastHb[i]);
+                session_PacksSubsystems += parseFloat(sessionPacksSubsystems[i]);
             }
-            totalSessionPacksSubsystems += parseFloat(sessionPacksSubsystems[i]);
+            if(diffHBSubsystem < parseFloat(31)){
+                totalPacksSinceLastHb += parseFloat(sessionPacksSubsystems[i]);
+            }
+            total_PacksSubsystems += parseFloat(sessionPacksSubsystems[i]);
         }
 
         // Activity check
@@ -194,59 +220,37 @@ async function getUsersStats( users, members ){
             }
         });
 
-        const lastActiveTime = new Date(getAttribValueFromUser(user, attrib_LastActiveTime));
-        const lastHBTime = new Date(getAttribValueFromUser(user, attrib_LastHeartbeatTime));
-        const diffActiveTime = (currentTime - lastActiveTime) / 60000;
-        var diffHBTime = (currentTime - lastHBTime) / 60000;
-        // Check for Subsystem diff
-        diffHBTime = Math.min(diffHBTime, smallerDiffHBTimeSubsystems);
-
-        // PlayerState 0=missing - 1=waiting - 2=valid
-        var activeState = 0; 
+        const userActiveState = await refreshUserActiveState(user);
+        const activeState = userActiveState[0];
+        var inactiveTime = userActiveState[1];
 
         var barOffset = 50;
 
-        if(diffActiveTime < 31) { // If player active less than 31mn ago (might still not have received HB)
-            if(diffHBTime < 31){ // If last HB less than 31mn
-                userOutput += colorText(visibleUsername, "green");
-                activeState = 2;
-            }
-            else{
-                userOutput += colorText(visibleUsername, "yellow") + " - started";
-                activeState = 1;
-            }
+        if(activeState == "active")
+        {
+            userOutput += colorText(visibleUsername, "green");
         }
-        else{ // If player active more than 31mn ago (HB have should havebeen received)
-            if(diffHBTime < 31){ // If last HB less than 31mn
-                userOutput += colorText(visibleUsername, "green");
-                activeState = 2;
-            }
-            else{
-                userOutput += colorText(visibleUsername, "red") + ` - inactive for ${colorText(Math.round(diffHBTime),"red")}mn`;
-                barOffset += 11; // 11 more because coloring the text adds 11 hidden characters
-            }
+        else if (activeState == "waiting") {
+            userOutput += colorText(visibleUsername, "yellow") + " - started";
+        }
+        else{ // Inactive
+            inactiveTime = Math.round(parseFloat(inactiveTime));
+            userOutput += colorText(visibleUsername, "red") + ` - inactive for ${colorText(inactiveTime,"red")}mn`;
+            barOffset += 11; // 11 more because coloring the text adds 11 hidden characters
         }
 
         userOutput = addTextBar(userOutput, barOffset);
 
         // Instances
-        var instances = "0";
-        if( activeState == 2 ){
-            instances = parseInt(getAttribValueFromUser(user, attrib_HBInstances, 0));
-            // Add Subsystems instances
-            instances += parseInt(totalInstancesSubsystems);
-        }
-        else{
-            instances = parseInt(getAttribValueFromUser(user, attrib_AverageInstances, 0));
-        }
+        
+        var instances = await refreshUserRealInstances(user, activeState);
         userOutput += colorText(` ${instances} instances\n`, "gray");
-        await setUserAttribValue( id, username, attrib_RealInstances, instances );
 
         // Session stats       
 
         var sessionTime = getAttribValueFromUser(user, attrib_SessionTime)
         sessionTime = roundToOneDecimal( parseFloat( Math.max(sessionTime,biggerSessionTimeSubsystems) ) );
-        var sessionPackF = parseFloat(getAttribValueFromUser(user, attrib_SessionPacksOpened)) + totalSessionPacksSubsystems;
+        var sessionPackF = parseFloat(getAttribValueFromUser(user, attrib_SessionPacksOpened)) + session_PacksSubsystems;
         var PacksUserSinceLastHb = diffHBTime > 31 ? 0 : parseFloat(getAttribValueFromUser(user, attrib_DiffPacksSinceLastHB));
         var PackSinceLastHb = PacksUserSinceLastHb + totalPacksSinceLastHb;
 
@@ -266,7 +270,7 @@ async function getUsersStats( users, members ){
 
         // Pack stats
         const totalPack = parseInt(getAttribValueFromUser(user, attrib_TotalPacksOpened));
-        var sessionPackI = parseInt(getAttribValueFromUser(user, attrib_SessionPacksOpened)) + totalSessionPacksSubsystems;
+        var sessionPackI = parseInt(getAttribValueFromUser(user, attrib_SessionPacksOpened)) + total_PacksSubsystems;
         // Add Subsystems
         // sessionPackI += parseInt(totalSessionPacksSubsystems);
         const totalGodPack = parseInt(getAttribValueFromUser(user, attrib_GodPackFound));
@@ -291,12 +295,17 @@ async function getUsersStats( users, members ){
 
 async function sendUserStats( guild ){
 
+    console.log("================ Update Users Stats ================")
+
     await bulkDeleteMessages(guild.channels.cache.get(channelID_UserStats), 20);
 
     // CACHE MEMBERS
     const m = await guild.members.fetch()
 
     var activeUsers = await getActiveUsers();
+    // Exit if 0 activeUsers
+    if (activeUsers == "" || activeUsers.length == 0) {return};
+
     var activeUsersInfos = await getUsersStats(activeUsers, m);
 
     // Send users data message by message otherwise it gets over the 2k words limit
@@ -328,15 +337,48 @@ async function sendUserStats( guild ){
 
 async function sendIDs( guild, updateServer = true ){
 
-    var activeUsers = await getActiveUsers();
-    const activePocketIDs = getAttribValueFromUsers(activeUsers, attrib_PocketID, "").join('\n');
+    const activePocketIDs = await getActiveIDs();
 
     const text_contentOf = localize("Contenu de IDs.txt", "Content of IDs.txt");
     const text_activePocketIDs = `*${text_contentOf} :*\n\`\`\`\n${activePocketIDs}\n\`\`\``;
     // Send instances and IDs
     guild.channels.cache.get(channelID_IDs).send({ content:`${text_activePocketIDs}`});
     if(updateServer){
-        updateGist(activePocketIDs);
+        updateGist();
+    }
+}
+
+async function inactivityCheck(myGuild){
+
+    console.log("================ Check inactivity ================")
+    
+    var inactiveCount = 0;
+    
+    var activeUsers = await getActiveUsers(); // Get current active users
+    // Exit if 0 activeUsers
+    if (activeUsers == "" || activeUsers.length == 0) {return};
+
+    for ( var i = 0; i < activeUsers.length; i++ ) {
+        
+        const user = activeUsers[i];
+
+        // Check user active state
+        const userActiveState = await refreshUserActiveState(user);
+        // Check user instances count
+        const userInstances = await refreshUserRealInstances(user, userActiveState[0]);
+        
+        if (userInstances >= 1){continue;}
+
+        // Else we can kick the user
+        await setUserAttribValue( getIDFromUser(user), getUsernameFromUser(user), attrib_Active, false);
+        
+        // And prevent him that he have been kicked
+        const text_haveBeenKicked = localize("a été kick des rerollers actifs pour inactivité"," have been kicked out of active rerollers for inactivity");
+        myGuild.channels.cache.get(channelID_IDs).send({ content:`<@${getIDFromUser(user)}> ${text_haveBeenKicked}`});
+    };
+
+    if(inactiveCount >= 1){
+        updateGist();
     }
 }
 
@@ -351,7 +393,16 @@ async function createForumPost( guild, message, channelID, packName ) {
     
     var arrayGodpackMessage = splitMulti(message.content, ['<@','>','\n','(',')']);
     var ownerID = arrayGodpackMessage[1];
-    var ownerUsername = (await guild.members.fetch(cleanString(ownerID))).user.username;
+
+    const member = await getMemberByID(guild, ownerID);
+
+    // Skip if member do not exist
+    if (member == "") {
+        console.log(`Heartbeat from ID ${userID} is no registered on this server`)
+        return;
+    }
+    var ownerUsername = (member).user.username;
+
     var accountName = arrayGodpackMessage[3];
     var accountID = arrayGodpackMessage[4];
     var text_packAmount = arrayGodpackMessage[7];
@@ -416,8 +467,7 @@ async function markAsDead( interaction, optionalText = "" ){
         
     const forumPost = client.channels.cache.get(interaction.channelId);
     // Edit a thread
-    forumPost.edit({ name: `${forumPost.name.replace(text_waitingLogo, text_deadLogo)}` })
-        .catch(console.error);
+    forumPost.edit({ name: `${forumPost.name.replace(text_waitingLogo, text_deadLogo)}` });
 
     await sendReceivedMessage(interaction, optionalText + text_deadLogo + ` ` + text_markAsDead);
     
@@ -431,12 +481,21 @@ client.once(Events.ClientReady, async c => {
 
     const guild = client.guilds.cache.get(guildID);
 
+    // Every "refreshInterval/2" mn it will alternate from sendUserStat to inactivityCheck
     setInterval(() =>{
         startIntervalTime = Date.now();
-        sendUserStats(guild);
-    }, refreshStatsInterval);
+        evenTurnInterval = !evenTurnInterval;
 
-    // // Clear all guild commands (Warning : also clearupdateGist channels restrictions set on discord)
+        if (evenTurnInterval) {
+            sendUserStats(guild);
+        } 
+        else if(AutoKickInactive) {
+            inactivityCheck(guild);
+        }
+
+    }, convertMnToMs(refreshInterval/2));
+
+    // // Clear all guild commands (Warning : also clear channels restrictions set on discord)
     // const guild = await client.guilds.fetch(guildID);
     // guild.commands.set([]);
 
@@ -515,6 +574,11 @@ client.once(Events.ClientReady, async c => {
         .setName(`miss`)
         .setDescription(`${missDesc}`);
 
+    const misscountDesc = localize("Montre le rapport de miss par temps passé à roll", "Show how many miss rerollers have done while active");
+    const misscountSCB = new SlashCommandBuilder()
+        .setName(`misscount`)
+        .setDescription(`${misscountDesc}`);
+
     const lastactivityDesc = localize("Montre à combien de temps remonte le dernier Heartbeat", "Show how long since the last Heartbeat was");
     const lastactivitySCB = new SlashCommandBuilder()
         .setName(`lastactivity`)
@@ -587,7 +651,10 @@ client.once(Events.ClientReady, async c => {
     client.application.commands.create(deadCommand, guildID);
 
     const missCommand = missSCB.toJSON();
-    client.application.commands.create(missCommand, guildID);
+    client.application.commands.create(missCommand, guildID);    
+    
+    const misscountCommand = misscountSCB.toJSON();
+    client.application.commands.create(misscountCommand, guildID);
 
     const lastactivityCommand = lastactivitySCB.toJSON();
     client.application.commands.create(lastactivityCommand, guildID);
@@ -755,8 +822,7 @@ client.on(Events.InteractionCreate, async interaction => {
 
         const forumPost = client.channels.cache.get(interaction.channelId);
         // Edit a thread
-        forumPost.edit({ name: `${forumPost.name.replace(text_waitingLogo, text_verifiedLogo)}` })
-            .catch(console.error);
+        forumPost.edit({ name: `${forumPost.name.replace(text_waitingLogo, text_verifiedLogo)}` });
 
         await sendReceivedMessage(interaction, text_verifiedLogo + ` ` + text_markAsVerified + ` ${forumPost}`);
     }
@@ -787,6 +853,9 @@ client.on(Events.InteractionCreate, async interaction => {
             var newMissAmount = parseInt(missAmount)+1;
             var missNeeded = numbersMiss[1];
 
+            var totalMiss = await getUserAttribValue( client, interactionUserID, attrib_TotalMiss, 0 );
+            await setUserAttribValue( interactionUserID, interactionUserName, attrib_TotalMiss, parseInt(totalMiss)+1);
+
             if(newMissAmount >= missNeeded){
                 
                 await initialMessage.edit( `${replaceMissCount(initialMessage.content, newMissAmount)}`);
@@ -807,7 +876,46 @@ client.on(Events.InteractionCreate, async interaction => {
         }
     }
 
-    // DEAD COMMAND
+    // MISS COUNT COMMAND
+    if(interaction.commandName === `misscount`){
+
+        await interaction.deferReply();
+
+        // text_days = localize("jour","h");
+        var activityOutput = "\`\`\`\n";
+
+        const allUsers = await getAllUsers();
+
+        for( var i = 0; i < allUsers.length; i++ ) {
+            
+            var user = allUsers[i];
+            var userID = getIDFromUser(user);
+            
+            const member = await getMemberByID(guild, userID);
+
+            // Skip if member do not exist
+            if (member == "") {
+                console.log(`Heartbeat from ID ${userID} is no registered on this server`)
+                continue;
+            }
+
+            var userDisplayName = (member).user.displayName;
+            const totalMiss = getAttribValueFromUser(user, attrib_TotalMiss, 0);
+            const totalTime = getAttribValueFromUser(user, attrib_TotalTime, 0);
+            const totalTimeHour = parseFloat(totalTime)/60;
+            var missPerHour = roundToOneDecimal( parseFloat(totalMiss) / totalTimeHour);
+
+            missPerHour = isNaN(missPerHour) || missPerHour == Infinity ? 0 : missPerHour;
+
+            activityOutput += addTextBar(`${userDisplayName} `, 20, false) + ` ${missPerHour} miss per hour\n`
+        };
+
+        activityOutput+="\`\`\`";
+
+        await sendReceivedMessage(interaction, activityOutput);
+    }
+
+    // LAST ACTIVITY COMMAND
     if(interaction.commandName === `lastactivity`){
 
         await interaction.deferReply();
@@ -820,7 +928,15 @@ client.on(Events.InteractionCreate, async interaction => {
         for( var i = 0; i < allUsers.length; i++ ) {
             
             var userID = getIDFromUser(allUsers[i]);
-            var userDisplayName = (await guild.members.fetch(cleanString(userID))).user.displayName;
+            const member = await getMemberByID(guild, userID);
+
+            // Skip if member do not exist
+            if (member == "") {
+                console.log(`Heartbeat from ID ${userID} is no registered on this server`)
+                continue;
+            }
+
+            var userDisplayName = (member).user.displayName;
 
             const lastHBTime = new Date(getAttribValueFromUser(allUsers[i], attrib_LastHeartbeatTime));
             var diffTime = (Date.now() - lastHBTime) / 60000 / 60;
@@ -1001,7 +1117,15 @@ client.on("messageCreate", async (message) => {
             return await message.reply(`${text_WrongHB} **( ${userID} )**\n${text_CorrectInput}`);
         }
 
-        var userUsername = (await guild.members.fetch(cleanString(userID))).user.username;
+        const member = await getMemberByID(guild, userID);
+
+        // Skip if member do not exist
+        if (member == "") {
+            console.log(`Heartbeat from ID ${userID} is no registered on this server`)
+            return;
+        }
+
+        var userUsername = (member).user.username;
         
         if(firstLineSplit.length <= 1 ) { // If ID do not have underscore
 
@@ -1012,17 +1136,22 @@ client.on("messageCreate", async (message) => {
                 const time = timeAndPacks[0];
                 var packs = timeAndPacks[1];
 
-                await setUserAttribValue( userID, userUsername, attrib_HBInstances, instances);
-                await setUserAttribValue( userID, userUsername, attrib_SessionTime, time);
-    
+                // Get previously saved time
+                
                 if( time == "0" ){
+                    var totalTime = await getUserAttribValue( client, userID, attrib_TotalTime, 0 );
+                    var sessionTime = await getUserAttribValue( client, userID, attrib_SessionTime, 0 );
+                    await setUserAttribValue( userID, userUsername, attrib_TotalTime, parseFloat(totalTime) + parseFloat(sessionTime));
+
                     var totalPacks = await getUserAttribValue( client, userID, attrib_TotalPacksOpened, 0 );
                     var sessionPacks = await getUserAttribValue( client, userID, attrib_SessionPacksOpened, 0 );
                     await setUserAttribValue( userID, userUsername, attrib_TotalPacksOpened, parseInt(totalPacks) + parseInt(sessionPacks));
                 }
                 var LastPacks = await getUserAttribValue( client, userID, attrib_SessionPacksOpened, 0 );
                 await setUserAttribValue( userID, userUsername, attrib_DiffPacksSinceLastHB, packs-LastPacks);
+                await setUserAttribValue( userID, userUsername, attrib_SessionTime, time);
                 await setUserAttribValue( userID, userUsername, attrib_SessionPacksOpened, packs);
+                await setUserAttribValue( userID, userUsername, attrib_HBInstances, instances);
                 await setUserAttribValue( userID, userUsername, attrib_LastHeartbeatTime, new Date().toString());
             }
         }
@@ -1037,9 +1166,7 @@ client.on("messageCreate", async (message) => {
                 const time = timeAndPacks[0];
                 var packs = timeAndPacks[1];
 
-                await setUserSubsystemAttribValue( userID, userUsername, subSystemName, attrib_HBInstances, instances);
-                await setUserSubsystemAttribValue( userID, userUsername, subSystemName, attrib_SessionTime, time);
-
+                
                 if( time == "0" ){
                     var totalPacks = await getUserAttribValue( client, userID, attrib_TotalPacksOpened, 0 );
                     var sessionSubsystemPacks = await getUserSubsystemAttribValue( client, userID, subSystemName, attrib_SessionPacksOpened, 0 );
@@ -1048,6 +1175,7 @@ client.on("messageCreate", async (message) => {
                 var LastSubsystemPacks = await getUserSubsystemAttribValue( client, userID, subSystemName, attrib_SessionPacksOpened, 0 );
                 await setUserSubsystemAttribValue( userID, userUsername, subSystemName, attrib_DiffPacksSinceLastHB, packs-LastSubsystemPacks);
                 await setUserSubsystemAttribValue( userID, userUsername, subSystemName, attrib_SessionPacksOpened, packs);
+                await setUserSubsystemAttribValue( userID, userUsername, subSystemName, attrib_HBInstances, instances);
                 await setUserSubsystemAttribValue( userID, userUsername, subSystemName, attrib_LastHeartbeatTime, new Date().toString());
 
             }

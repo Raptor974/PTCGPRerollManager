@@ -35,6 +35,8 @@ import {
     text_waitingLogo,
     refreshInterval,
     inactiveTime,
+    inactiveWhenInstance,
+    inactiveIfMainOffline,
     AutoKickInactive,
 } from './config.js';
 
@@ -367,11 +369,11 @@ async function inactivityCheck(myGuild){
         // Check user instances count
         const userInstances = await refreshUserRealInstances(user, userActiveState[0]);
         
-        if (userInstances >= 1){continue;}
+        if (userInstances > parseInt(inactiveWhenInstance)){continue;}
 
         // Else we can kick the user
         await setUserAttribValue( getIDFromUser(user), getUsernameFromUser(user), attrib_Active, false);
-        
+
         // And prevent him that he have been kicked
         const text_haveBeenKicked = localize("a été kick des rerollers actifs pour inactivité"," have been kicked out of active rerollers for inactivity");
         myGuild.channels.cache.get(channelID_IDs).send({ content:`<@${getIDFromUser(user)}> ${text_haveBeenKicked}`});
@@ -1115,8 +1117,8 @@ client.on("messageCreate", async (message) => {
     {
         const text_WrongHB = localize("Quelqu'un a mal configuré ses paramètres Heartbeat","Someone missed up their Heartbeat settings");
         const text_CorrectInput = localize(
-            "Veuillez entrer votre \`\`\`DiscordID\`\`\` dans ce champ pour votre PC Principal et \`\`\`DiscordID_YOURPCNAME\`\`\` Pour les autre ordinateurs si vous souhaitez en utiliser plusieurs",
-            "Please input your \`\`\`DiscordID\`\`\` in this field for your main PC and \`\`\`DiscordID_YOURPCNAME\`\`\` For others computers if you wish to use multiple"
+            "Veuillez vérifier que vous avez bien entré votre **DiscordID** sur le script AHK dans l'onglet Discord Heartbeat Name, ca devrait ressembler ca : \`\`\`0123456789012345\`\`\` Pour votre PC principal et \`\`\`0123456789012345_YOURPCNAME\`\`\` Pour les autre ordinateurs si vous souhaitez en utiliser plusieurs",
+            "Please verify you had input your **DiscordID** in the AHK script under Discord Heartbeat Name, it should look like this : \`\`\`0123456789012345\`\`\` For your main PC and \`\`\`0123456789012345_YOURPCNAME\`\`\` For others computers if you wish to use multiple"
         );
 
         var heartbeatDatas = message.content.split("\n");
@@ -1165,6 +1167,15 @@ client.on("messageCreate", async (message) => {
                 await setUserAttribValue( userID, userUsername, attrib_SessionPacksOpened, packs);
                 await setUserAttribValue( userID, userUsername, attrib_HBInstances, instances);
                 await setUserAttribValue( userID, userUsername, attrib_LastHeartbeatTime, new Date().toString());
+
+                const mainInactive = heartbeatDatas[2].toLowerCase().includes("main");
+                
+                if(mainInactive && inactiveIfMainOffline && AutoKickInactive){
+                    await setUserAttribValue( userID, userUsername, attrib_Active, false);
+                    // And prevent him that he have been kicked
+                    const text_haveBeenKicked = localize("a été kick des rerollers actifs car son Main est Offline"," have been kicked out of active rerollers due to Main being Offline");
+                    guild.channels.cache.get(channelID_IDs).send({ content:`<@${userID}> ${text_haveBeenKicked}`});
+                }
             }
         }
         else{ // If ID have underscore
@@ -1190,6 +1201,15 @@ client.on("messageCreate", async (message) => {
                 await setUserSubsystemAttribValue( userID, userUsername, subSystemName, attrib_HBInstances, instances);
                 await setUserSubsystemAttribValue( userID, userUsername, subSystemName, attrib_LastHeartbeatTime, new Date().toString());
 
+                
+                const mainInactive = heartbeatDatas[2].toLowerCase().includes("main");
+                
+                if(mainInactive && inactiveIfMainOffline && AutoKickInactive){
+                    await setUserAttribValue( userID, userUsername, attrib_Active, false);
+                    // And prevent him that he have been kicked
+                    const text_haveBeenKicked = localize("a été kick des rerollers actifs car son Main est Offline"," have been kicked out of active rerollers due to Main being Offline");
+                    guild.channels.cache.get(channelID_IDs).send({ content:`<@${userID}> ${text_haveBeenKicked}`});
+                }
             }
         }
     }
